@@ -217,14 +217,45 @@ export const normalizeStudentProfile = (raw: any): StudentProfile => {
   };
 };
 
+const SESSION_STORAGE_KEY = 'peerforge_user_session';
+
+const getInitialStoredUser = (): StudentProfile | null => {
+  try {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem(SESSION_STORAGE_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        return normalizeStudentProfile(parsed);
+      }
+    }
+  } catch (err) {
+    console.warn('Could not restore user session from localStorage:', err);
+  }
+  return null;
+};
+
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [themeMode, setThemeModeState] = useState<'light' | 'dark' | 'system'>('system');
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
 
-  // Application Data States
+  // Application Data States & Persistent Session
   const [allStudents, setAllStudents] = useState<StudentProfile[]>(() => (isSupabaseConfigured ? [] : INITIAL_STUDENTS));
-  const [currentUser, setCurrentUser] = useState<StudentProfile | null>(null);
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [currentUser, setCurrentUser] = useState<StudentProfile | null>(getInitialStoredUser);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => Boolean(getInitialStoredUser()));
+
+  const persistSession = (profile: StudentProfile | null) => {
+    try {
+      if (typeof window !== 'undefined') {
+        if (profile) {
+          localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(profile));
+        } else {
+          localStorage.removeItem(SESSION_STORAGE_KEY);
+        }
+      }
+    } catch (e) {
+      console.warn('LocalStorage error:', e);
+    }
+  };
 
   const [projects, setProjects] = useState<Project[]>(() => (isSupabaseConfigured ? [] : INITIAL_PROJECTS));
   const [questions, setQuestions] = useState<Question[]>(() => (isSupabaseConfigured ? [] : INITIAL_QUESTIONS));
@@ -332,16 +363,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // 2. Auth Session Check & Auth State Change Listener
       supabase.auth.getSession().then(async ({ data: { session } }) => {
         if (session?.user) {
+          const cleanEmail = (session.user.email || '').trim().toLowerCase();
           const { data: sbStudent } = await supabase
             .from('students')
             .select('*')
-            .or(`id.eq.${session.user.id},email.eq.${session.user.email}`)
+            .or(`id.eq.${session.user.id},email.ilike.${cleanEmail},email.eq.${cleanEmail}`)
             .maybeSingle();
 
           if (sbStudent) {
             const student = normalizeStudentProfile(sbStudent);
             setCurrentUser(student);
             setIsAuthenticated(true);
+            persistSession(student);
             const resolvedTheme =
               student.defaultTheme === 'dark'
                 ? 'dark'
@@ -357,20 +390,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
         if (event === 'SIGNED_OUT') {
-          setIsAuthenticated(false);
-          setCurrentUser(null);
-          setTheme('light');
+          // Do NOT automatically log out if a verified local session is present in storage,
+          // because transient auth rejections or table-based logins should stay authenticated.
+          const localStored = typeof window !== 'undefined' ? localStorage.getItem(SESSION_STORAGE_KEY) : null;
+          if (!localStored) {
+            setIsAuthenticated(false);
+            setCurrentUser(null);
+            setTheme('light');
+          }
         } else if (session?.user) {
+          const cleanEmail = (session.user.email || '').trim().toLowerCase();
           const { data: sbStudent } = await supabase
             .from('students')
             .select('*')
-            .or(`id.eq.${session.user.id},email.eq.${session.user.email}`)
+            .or(`id.eq.${session.user.id},email.ilike.${cleanEmail},email.eq.${cleanEmail}`)
             .maybeSingle();
 
           if (sbStudent) {
             const student = normalizeStudentProfile(sbStudent);
             setCurrentUser(student);
             setIsAuthenticated(true);
+            persistSession(student);
             const resolvedTheme =
               student.defaultTheme === 'dark'
                 ? 'dark'
@@ -380,6 +420,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 ? 'dark'
                 : 'light';
             setTheme(resolvedTheme);
+          } else {
+            const cached = getInitialStoredUser();
+            if (cached && (cached.email.toLowerCase() === cleanEmail || cached.id === session.user.id)) {
+              setCurrentUser(cached);
+              setIsAuthenticated(true);
+            }
           }
         }
       });
@@ -657,6 +703,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const normalized = normalizeStudentProfile(s);
       setCurrentUser(normalized);
       setIsAuthenticated(true);
+      persistSession(normalized);
       const pref = normalized.defaultTheme || 'system';
       setThemeModeState(pref as 'light' | 'dark' | 'system');
     }
@@ -674,6 +721,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     updatedUser.completeness = Math.min(100, comp);
 
     setCurrentUser(updatedUser);
+    persistSession(updatedUser);
     setAllStudents(prev => prev.map(s => (s.id === currentUser.id ? updatedUser : s)));
 
     if (isSupabaseConfigured) {
@@ -1646,6 +1694,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     ) {
       setCurrentUser(null);
       setIsAuthenticated(false);
+      persistSession(null);
     }
 
     // 2. Also notify server memory if running
@@ -1885,7 +1934,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const { data: sbProfile } = await supabase
             .from('students')
             .select('*')
-            .or(`id.eq.${data.user.id},email.eq.${cleanEmail}`)
+            .or(`id.eq.${data.user.id},email.ilike.${cleanEmail},email.eq.${cleanEmail}`)
             .maybeSingle();
 
           if (sbProfile) {
@@ -1939,6 +1988,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     }
 
+    // Direct database query fallback in case user exists in students table or allStudents is loading
+    if (!profileToLogin && isSupabaseConfigured) {
+      try {
+        const { data: dbStudent } = await supabase
+          .from('students')
+          .select('*')
+          .or(`email.ilike.${cleanEmail},gmailAccount.ilike.${cleanEmail},email.eq.${cleanEmail}`)
+          .maybeSingle();
+
+        if (dbStudent) {
+          if (password && dbStudent.password && dbStudent.password !== password) {
+            return {
+              success: false,
+              message: 'Incorrect password for this account. Please verify credentials.'
+            };
+          }
+          profileToLogin = normalizeStudentProfile(dbStudent);
+        }
+      } catch (err) {
+        console.warn('Direct student lookup in Supabase error:', err);
+      }
+    }
+
     if (!profileToLogin) {
       const matched = allStudents.find(
         s =>
@@ -1966,6 +2038,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     setCurrentUser(profileToLogin);
     setIsAuthenticated(true);
+    persistSession(profileToLogin);
     const resolvedTheme =
       profileToLogin.defaultTheme === 'dark'
         ? 'dark'
@@ -2117,6 +2190,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     setCurrentUser(newProfile);
     setIsAuthenticated(true);
+    persistSession(newProfile);
 
     return {
       success: true,
@@ -2147,6 +2221,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const logout = async () => {
+    persistSession(null);
     if (isSupabaseConfigured) {
       await supabase.auth.signOut().catch(() => {});
     }
