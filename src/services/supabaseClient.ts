@@ -16,15 +16,26 @@ import {
 
 import { sanitizeStudentForDb, sanitizeMessageText } from '../utils/storageOptimizer';
 
-// Supabase configuration
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'https://placeholder.supabase.co';
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || 'placeholder';
+const env = import.meta.env as Record<string, any>;
+
+const SUPABASE_URL =
+  env.VITE_SUPABASE_URL ||
+  env.SUPABASE_URL ||
+  env.NEXT_PUBLIC_SUPABASE_URL ||
+  'https://placeholder.supabase.co';
+
+const SUPABASE_ANON_KEY =
+  env.VITE_SUPABASE_ANON_KEY ||
+  env.SUPABASE_ANON_KEY ||
+  env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+  env.SUPABASE_PUBLISHABLE_KEY ||
+  'placeholder';
 
 export const isSupabaseConfigured = Boolean(
-  import.meta.env.VITE_SUPABASE_URL &&
-  import.meta.env.VITE_SUPABASE_ANON_KEY &&
-  !import.meta.env.VITE_SUPABASE_URL.includes('placeholder') &&
-  !import.meta.env.VITE_SUPABASE_URL.includes('your-project')
+  SUPABASE_URL &&
+  SUPABASE_ANON_KEY &&
+  !SUPABASE_URL.includes('placeholder') &&
+  !SUPABASE_URL.includes('your-project')
 );
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
