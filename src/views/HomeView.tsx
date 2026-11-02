@@ -36,6 +36,7 @@ export const HomeView: React.FC = () => {
     setSelectedStudentForProfile,
     setSelectedProjectForDetail,
     setSelectedQuestionForDetail,
+    deleteEvent,
     isAuthenticated,
     openAuthModal
   } = useApp();
@@ -533,6 +534,17 @@ export const HomeView: React.FC = () => {
                     <p className="text-[11px] text-[var(--text-secondary)] line-clamp-2">
                       {evt.description}
                     </p>
+                    {currentUser?.role === 'teacher' && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          deleteEvent(evt.id);
+                        }}
+                        className="text-[10px] text-red-600 hover:text-red-800 font-semibold cursor-pointer"
+                      >
+                        Delete
+                      </button>
+                    )}
                   </div>
                 ))
               )}

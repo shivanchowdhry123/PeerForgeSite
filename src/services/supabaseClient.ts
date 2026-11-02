@@ -10,7 +10,8 @@ import {
   Message,
   ContentReport,
   ContactInquiry,
-  UploadedFile
+  UploadedFile,
+  EventRegistration
 } from '../types';
 
 import { sanitizeStudentForDb, sanitizeMessageText } from '../utils/storageOptimizer';
@@ -333,6 +334,100 @@ export async function saveSupabaseEvent(event: SchoolEvent): Promise<boolean> {
     return true;
   } catch (err) {
     console.warn('Supabase save event error:', err);
+    return false;
+  }
+}
+
+export async function deleteSupabaseEvent(eventId: string): Promise<boolean> {
+  if (!isSupabaseConfigured) return false;
+  try {
+    const { error } = await supabase.from('events').delete().eq('id', eventId);
+    if (error) throw error;
+    // Also clean up any registrations for this event
+    await supabase.from('event_registrations').delete().eq('event_id', eventId).catch(() => {});
+    return true;
+  } catch (err) {
+    console.warn('Supabase delete event error:', err);
+    return false;
+  }
+}
+
+// --- EVENT REGISTRATIONS (RSVP) ---
+export async function fetchSupabaseEventRegistrations(): Promise<EventRegistration[] | null> {
+  if (!isSupabaseConfigured) return null;
+  try {
+    const { data, error } = await supabase.from('event_registrations').select('*');
+    if (error) throw error;
+    if (!data) return [];
+    return data.map((row: any) => ({
+      id: row.id,
+      eventId: row.eventId || row.event_id,
+      userId: row.userId || row.user_id,
+      userName: row.userName || row.user_name,
+      userEmail: row.userEmail || row.user_email,
+      createdAt: row.createdAt || row.created_at
+    })) as EventRegistration[];
+  } catch (err) {
+    console.warn('Supabase fetch event registrations note (table may not exist yet):', err);
+    return null;
+  }
+}
+
+export async function saveSupabaseEventRegistration(registration: EventRegistration): Promise<boolean> {
+  if (!isSupabaseConfigured) return false;
+  try {
+    // Attempt 1: Standard PostgreSQL snake_case
+    const payloadSnake = {
+      id: registration.id,
+      event_id: registration.eventId,
+      user_id: registration.userId,
+      user_name: registration.userName || '',
+      user_email: registration.userEmail || '',
+      created_at: registration.createdAt || new Date().toISOString()
+    };
+    const { error: errSnake } = await supabase.from('event_registrations').upsert(payloadSnake);
+    if (!errSnake) return true;
+
+    // Attempt 2: CamelCase
+    const payloadCamel = {
+      id: registration.id,
+      eventId: registration.eventId,
+      userId: registration.userId,
+      userName: registration.userName || '',
+      userEmail: registration.userEmail || '',
+      createdAt: registration.createdAt || new Date().toISOString()
+    };
+    const { error: errCamel } = await supabase.from('event_registrations').upsert(payloadCamel);
+    if (!errCamel) return true;
+
+    console.warn('Supabase save event registration error:', errSnake || errCamel);
+    return false;
+  } catch (err) {
+    console.warn('Supabase save event registration exception:', err);
+    return false;
+  }
+}
+
+export async function deleteSupabaseEventRegistration(eventId: string, userId: string): Promise<boolean> {
+  if (!isSupabaseConfigured) return false;
+  try {
+    // Attempt 1: Standard snake_case
+    const { error: errSnake } = await supabase
+      .from('event_registrations')
+      .delete()
+      .match({ event_id: eventId, user_id: userId });
+    if (!errSnake) return true;
+
+    // Attempt 2: CamelCase
+    const { error: errCamel } = await supabase
+      .from('event_registrations')
+      .delete()
+      .match({ eventId: eventId, userId: userId });
+    if (!errCamel) return true;
+
+    return false;
+  } catch (err) {
+    console.warn('Supabase delete event registration exception:', err);
     return false;
   }
 }

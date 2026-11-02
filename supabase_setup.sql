@@ -69,13 +69,95 @@ CREATE TABLE IF NOT EXISTS students (
 -- Enable Row Level Security (RLS)
 ALTER TABLE students ENABLE ROW LEVEL SECURITY;
 
--- Allow public read of verified student profiles
+DROP POLICY IF EXISTS "Allow public read access to students" ON students;
 CREATE POLICY "Allow public read access to students" 
 ON students FOR SELECT 
 USING (true);
 
 -- Allow authenticated users to insert/update their own profile
+DROP POLICY IF EXISTS "Allow users to upsert their own profile" ON students;
 CREATE POLICY "Allow users to upsert their own profile" 
 ON students FOR ALL 
 USING (true)
 WITH CHECK (true);
+
+
+-- ------------------------------------------------------------------------------
+-- 4. 'events' TABLE & FACULTY DELETE RLS POLICY
+-- ------------------------------------------------------------------------------
+-- If your 'events' table already exists and you need to ensure DELETE is allowed:
+ALTER TABLE events ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Allow public read access to events" ON events;
+CREATE POLICY "Allow public read access to events" 
+ON events FOR SELECT 
+USING (true);
+
+DROP POLICY IF EXISTS "Allow faculty to insert events" ON events;
+CREATE POLICY "Allow faculty to insert events" 
+ON events FOR INSERT 
+WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow updates to events" ON events;
+CREATE POLICY "Allow updates to events" 
+ON events FOR UPDATE 
+USING (true) 
+WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow faculty to delete events" ON events;
+CREATE POLICY "Allow faculty to delete events" 
+ON events FOR DELETE 
+USING (true);
+
+-- Full 'events' table definition (for fresh setup):
+CREATE TABLE IF NOT EXISTS events (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  date TEXT NOT NULL,
+  time TEXT,
+  location TEXT,
+  category TEXT DEFAULT 'Official Announcement',
+  description TEXT,
+  organizer TEXT,
+  "isOfficial" BOOLEAN DEFAULT true,
+  "rsvpCount" INTEGER DEFAULT 0,
+  "isRsvpd" BOOLEAN DEFAULT false,
+  "linkText" TEXT DEFAULT 'RSVP Now',
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+
+-- ------------------------------------------------------------------------------
+-- 5. 'event_registrations' TABLE & RLS POLICIES (Event RSVP & Dynamic Counts)
+-- ------------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS event_registrations (
+  id TEXT PRIMARY KEY,
+  event_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  user_name TEXT,
+  user_email TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(event_id, user_id)
+);
+
+-- Enable Row Level Security (RLS)
+ALTER TABLE event_registrations ENABLE ROW LEVEL SECURITY;
+
+-- Allow reading all registrations to calculate dynamic attendee counts
+DROP POLICY IF EXISTS "Allow public read access to event_registrations" ON event_registrations;
+CREATE POLICY "Allow public read access to event_registrations" 
+ON event_registrations FOR SELECT 
+USING (true);
+
+-- Allow students/users to register for events
+DROP POLICY IF EXISTS "Allow users to register for events" ON event_registrations;
+CREATE POLICY "Allow users to register for events" 
+ON event_registrations FOR INSERT 
+WITH CHECK (true);
+
+-- Allow students to deregister / cancel their RSVP
+DROP POLICY IF EXISTS "Allow users to deregister from events" ON event_registrations;
+CREATE POLICY "Allow users to deregister from events" 
+ON event_registrations FOR DELETE 
+USING (true);

@@ -14,14 +14,18 @@ import {
   Plus,
   X,
   ShieldCheck,
-  Sparkles
+  Sparkles,
+  Trash2,
+  AlertTriangle
 } from 'lucide-react';
 
 export const EventsView: React.FC = () => {
-  const { events, toggleEventRsvp, currentUser, addEvent } = useApp();
+  const { events, toggleEventRsvp, currentUser, addEvent, deleteEvent } = useApp();
   const [filterCategory, setFilterCategory] = useState('All');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [successBanner, setSuccessBanner] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [isDeletingId, setIsDeletingId] = useState<string | null>(null);
 
   // New Event Form State
   const canPublish = currentUser && (currentUser.role === 'developer' || currentUser.role === 'teacher' || currentUser.role === 'admin');
@@ -67,6 +71,18 @@ export const EventsView: React.FC = () => {
     setIsModalOpen(false);
     setSuccessBanner('Upcoming event published successfully to the school calendar!');
     setTimeout(() => setSuccessBanner(null), 4000);
+  };
+
+  const handleDeleteEvent = async (eventId: string, eventTitle: string) => {
+    setIsDeletingId(eventId);
+    try {
+      await deleteEvent(eventId);
+      setSuccessBanner(`Event "${eventTitle}" deleted successfully from the school calendar.`);
+      setTimeout(() => setSuccessBanner(null), 4000);
+    } finally {
+      setIsDeletingId(null);
+      setConfirmDeleteId(null);
+    }
   };
 
   const filteredEvents = (events || []).filter(e => {
@@ -187,18 +203,71 @@ export const EventsView: React.FC = () => {
                 </div>
               </div>
 
-              {/* RSVP Button */}
-              <div className="shrink-0">
+              {/* Action Buttons: Faculty Delete & RSVP */}
+              <div className="flex items-center gap-2 shrink-0 flex-wrap sm:flex-nowrap">
+                {canPublish && (
+                  confirmDeleteId === event.id ? (
+                    <div className="flex items-center gap-1.5 p-1 rounded-xl bg-red-50 dark:bg-red-950/70 border border-red-200 dark:border-red-800 animate-in fade-in">
+                      <span className="text-[11px] font-semibold text-red-700 dark:text-red-300 px-1.5 flex items-center gap-1">
+                        <AlertTriangle className="w-3 h-3 text-red-500" />
+                        Delete event?
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteEvent(event.id, event.title)}
+                        disabled={isDeletingId === event.id}
+                        className="px-2.5 py-1 rounded-lg bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-xs font-semibold flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
+                        title="Confirm deletion"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        <span>{isDeletingId === event.id ? 'Deleting...' : 'Confirm'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConfirmDeleteId(null)}
+                        className="px-2 py-1 rounded-lg bg-[var(--bg-surface)] hover:bg-[var(--bg-subtle)] text-[var(--text-secondary)] text-xs font-medium border border-[var(--border-color)] transition-all cursor-pointer"
+                        title="Cancel"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDeleteId(event.id)}
+                      className="px-3 py-2 rounded-xl text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 hover:bg-red-50 dark:hover:bg-red-950/40 border border-transparent hover:border-red-200 dark:hover:border-red-900 text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5"
+                      title="Delete this event (Faculty access)"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Delete</span>
+                    </button>
+                  )
+                )}
+
+                {/* RSVP / Registration Button */}
                 <button
-                  onClick={() => toggleEventRsvp(event.id)}
-                  className={`px-5 py-2 rounded-xl text-xs font-semibold transition-all shadow-xs flex items-center gap-1.5 ${
+                  type="button"
+                  onClick={async () => {
+                    const wasRsvpd = event.isRsvpd;
+                    const success = await toggleEventRsvp(event.id);
+                    if (success) {
+                      setSuccessBanner(
+                        wasRsvpd
+                          ? `You have deregistered from "${event.title}".`
+                          : `Successfully registered for "${event.title}"! Your spot is confirmed.`
+                      );
+                      setTimeout(() => setSuccessBanner(null), 3500);
+                    }
+                  }}
+                  className={`px-5 py-2 rounded-xl text-xs font-semibold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer ${
                     event.isRsvpd
-                      ? 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-200'
+                      ? 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800 hover:bg-red-50 hover:text-red-700 hover:border-red-300 transition-colors'
                       : 'bg-blue-600 hover:bg-blue-700 text-white'
                   }`}
+                  title={event.isRsvpd ? 'Click to cancel your registration / deregister' : 'Register for this event'}
                 >
                   <Bookmark className="w-3.5 h-3.5" />
-                  <span>{event.isRsvpd ? 'Attending ✓' : 'RSVP / Register'}</span>
+                  <span>{event.isRsvpd ? 'Attending ✓ (Deregister)' : 'RSVP / Register'}</span>
                 </button>
               </div>
             </div>
@@ -210,7 +279,11 @@ export const EventsView: React.FC = () => {
             <div className="pt-3 border-t border-[var(--border-color)]/60 flex items-center justify-between text-xs text-[var(--text-muted)]">
               <span>Organized by: <strong className="text-[var(--text-primary)]">{event.organizer}</strong></span>
               <span className="num-tabular font-semibold text-[var(--text-secondary)]">
-                {event.rsvpCount} students registered
+                {event.rsvpCount === 0
+                  ? '0 students registered'
+                  : event.rsvpCount === 1
+                  ? '1 student registered'
+                  : `${event.rsvpCount} students registered`}
               </span>
             </div>
           </div>

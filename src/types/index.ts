@@ -187,6 +187,15 @@ export interface Project {
   }>;
 }
 
+export interface EventRegistration {
+  id: string;
+  eventId: string;
+  userId: string;
+  userName?: string;
+  userEmail?: string;
+  createdAt?: string;
+}
+
 export interface SchoolEvent {
   id: string;
   title: string;
@@ -200,6 +209,7 @@ export interface SchoolEvent {
   rsvpCount: number;
   isRsvpd: boolean;
   linkText?: string;
+  registeredUserIds?: string[];
 }
 
 export interface AppNotification {

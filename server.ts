@@ -95,6 +95,14 @@ const db = {
   reports: [...INITIAL_REPORTS],
   contactInquiries: [...INITIAL_CONTACT_INQUIRIES],
   uploadedFiles: [...INITIAL_UPLOADED_FILES],
+  eventRegistrations: [] as Array<{
+    id: string;
+    eventId: string;
+    userId: string;
+    userName?: string;
+    userEmail?: string;
+    createdAt?: string;
+  }>,
   auditLogs: [
     {
       id: 'log-1',
@@ -1036,6 +1044,48 @@ app.post('/api/events/:id/rsvp', (req: Request, res: Response) => {
   event.isRsvpd = !event.isRsvpd;
   event.rsvpCount += event.isRsvpd ? 1 : -1;
   res.json(event);
+});
+
+app.delete('/api/events/:id', (req: Request, res: Response) => {
+  const index = db.events.findIndex(e => e.id === req.params.id);
+  if (index === -1) return res.status(404).json({ error: 'Event not found' });
+
+  const deletedEvent = db.events.splice(index, 1)[0];
+  db.eventRegistrations = db.eventRegistrations.filter(r => r.eventId !== req.params.id);
+  res.json({ success: true, message: 'Event deleted', event: deletedEvent });
+});
+
+app.get('/api/event-registrations', (_req: Request, res: Response) => {
+  res.json(db.eventRegistrations);
+});
+
+app.post('/api/event-registrations', (req: Request, res: Response) => {
+  const { eventId, userId, userName, userEmail } = req.body;
+  if (!eventId || !userId) {
+    return res.status(400).json({ error: 'eventId and userId are required' });
+  }
+
+  const existing = db.eventRegistrations.find(r => r.eventId === eventId && r.userId === userId);
+  if (!existing) {
+    const newReg = {
+      id: `reg-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      eventId,
+      userId,
+      userName: userName || 'Student',
+      userEmail: userEmail || '',
+      createdAt: new Date().toISOString()
+    };
+    db.eventRegistrations.push(newReg);
+    return res.json({ success: true, registration: newReg });
+  }
+  res.json({ success: true, registration: existing });
+});
+
+app.delete('/api/event-registrations/:eventId/:userId', (req: Request, res: Response) => {
+  const { eventId, userId } = req.params;
+  const initialLength = db.eventRegistrations.length;
+  db.eventRegistrations = db.eventRegistrations.filter(r => !(r.eventId === eventId && r.userId === userId));
+  res.json({ success: true, deleted: db.eventRegistrations.length < initialLength });
 });
 
 // --- NOTIFICATIONS ---

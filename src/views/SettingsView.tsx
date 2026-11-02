@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import {
   Lock,
@@ -14,7 +14,8 @@ import {
   AlertTriangle,
   Mail,
   KeyRound,
-  EyeOff
+  EyeOff,
+  User
 } from 'lucide-react';
 
 export const SettingsView: React.FC = () => {
@@ -44,7 +45,9 @@ export const SettingsView: React.FC = () => {
     showAchievements: true
   };
 
-  // Gmail & Password states
+  // Account Identity, Gmail & Password states
+  const [isEditingSettingsName, setIsEditingSettingsName] = useState(false);
+  const [settingsNameInput, setSettingsNameInput] = useState(currentUser?.name || '');
   const [showSettingsPassword, setShowSettingsPassword] = useState(false);
   const [isEditingSettingsGmail, setIsEditingSettingsGmail] = useState(false);
   const [settingsGmailInput, setSettingsGmailInput] = useState(currentUser?.gmailAccount || currentUser?.email || '');
@@ -52,6 +55,15 @@ export const SettingsView: React.FC = () => {
   const [settingsNewPassword, setSettingsNewPassword] = useState('');
   const [settingsConfirmPassword, setSettingsConfirmPassword] = useState('');
   const [credentialMessage, setCredentialMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (currentUser?.name) {
+      setSettingsNameInput(currentUser.name);
+    }
+    if (currentUser?.gmailAccount || currentUser?.email) {
+      setSettingsGmailInput(currentUser.gmailAccount || currentUser.email);
+    }
+  }, [currentUser?.id, currentUser?.name, currentUser?.gmailAccount, currentUser?.email]);
 
   if (!currentUser) {
     return (
@@ -72,6 +84,19 @@ export const SettingsView: React.FC = () => {
       </div>
     );
   }
+
+  const handleSettingsNameSave = (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanName = settingsNameInput.trim();
+    if (!cleanName || cleanName.length < 2) {
+      setCredentialMessage('Please provide a valid account name (at least 2 characters).');
+      return;
+    }
+    updateCurrentUserProfile({ name: cleanName });
+    setCredentialMessage(`Account name updated to "${cleanName}"!`);
+    setIsEditingSettingsName(false);
+    setTimeout(() => setCredentialMessage(null), 3000);
+  };
 
   const handleSettingsGmailSave = (e: React.FormEvent) => {
     e.preventDefault();
@@ -301,19 +326,91 @@ export const SettingsView: React.FC = () => {
         </div>
       </div>
 
-      {/* Account Credentials & Security: Gmail & Password */}
+      {/* Account Credentials & Security: Name, Gmail & Password */}
       <div className="p-6 rounded-3xl bg-[var(--bg-surface)] border border-[var(--border-color)] space-y-5 shadow-xs">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <KeyRound className="w-4 h-4 text-blue-500" />
             <h2 className="text-base font-bold text-[var(--text-primary)]">
-              Account Credentials & Security
+              Account Identity & Credentials
             </h2>
           </div>
           {credentialMessage && (
             <span className="text-xs font-semibold text-emerald-600 bg-emerald-50 dark:bg-emerald-950/60 px-3 py-1 rounded-full border border-emerald-200 animate-in fade-in">
               {credentialMessage}
             </span>
+          )}
+        </div>
+
+        {/* Account Name / Username */}
+        <div className="p-4 rounded-2xl bg-[var(--bg-subtle)] border border-[var(--border-color)] space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <User className="w-4 h-4 text-blue-500" />
+              <div>
+                <span className="text-xs font-bold text-[var(--text-primary)] block">Account Name / Username</span>
+                <span className="text-[11px] text-[var(--text-muted)]">Public display name shown on your profile, questions, and team projects</span>
+              </div>
+            </div>
+            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+              {currentUser.role === 'developer' ? 'Developer' : currentUser.role === 'teacher' ? 'Faculty' : 'Student'}
+            </span>
+          </div>
+
+          {!isEditingSettingsName ? (
+            <div className="flex items-center justify-between gap-3 pt-1">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-[var(--text-primary)]">
+                  {currentUser.name}
+                </span>
+                <span className="text-[10px] text-[var(--text-muted)] bg-[var(--bg-surface)] px-2 py-0.5 rounded border border-[var(--border-color)]">
+                  ID: {currentUser.id.replace('user-', '')}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setSettingsNameInput(currentUser.name);
+                  setIsEditingSettingsName(true);
+                }}
+                className="px-3 py-1 text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
+              >
+                Change Name
+              </button>
+            </div>
+          ) : (
+            <form onSubmit={handleSettingsNameSave} className="flex flex-col sm:flex-row sm:items-center gap-2 pt-1 animate-in fade-in">
+              <div className="relative flex-1">
+                <input
+                  type="text"
+                  value={settingsNameInput}
+                  onChange={e => setSettingsNameInput(e.target.value)}
+                  placeholder="Enter your full name or preferred username..."
+                  maxLength={60}
+                  className="w-full px-3 py-1.5 text-xs rounded-xl bg-white dark:bg-slate-800 border border-[var(--border-color)] text-[var(--text-primary)] focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                  required
+                  autoFocus
+                />
+              </div>
+              <div className="flex items-center gap-2 self-end sm:self-auto">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSettingsNameInput(currentUser.name);
+                    setIsEditingSettingsName(false);
+                  }}
+                  className="px-3 py-1.5 text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-xs transition-all cursor-pointer"
+                >
+                  Save Name
+                </button>
+              </div>
+            </form>
           )}
         </div>
 

@@ -13,7 +13,8 @@ import {
   ContactInquiry,
   UploadedFile,
   ProjectApplication,
-  ActivityEvent
+  ActivityEvent,
+  EventRegistration
 } from '../types';
 import {
   INITIAL_STUDENTS,
@@ -43,6 +44,10 @@ import {
   saveSupabaseMessage,
   saveSupabaseConversation,
   saveSupabaseEvent,
+  deleteSupabaseEvent,
+  fetchSupabaseEventRegistrations,
+  saveSupabaseEventRegistration,
+  deleteSupabaseEventRegistration,
   saveSupabaseNotification,
   saveSupabaseReport,
   saveSupabaseContactInquiry,
@@ -70,6 +75,7 @@ interface AppContextType {
   questions: Question[];
   answers: Answer[];
   events: SchoolEvent[];
+  eventRegistrations: EventRegistration[];
   notifications: AppNotification[];
   conversations: Conversation[];
   messages: Message[];
@@ -113,7 +119,7 @@ interface AppContextType {
   deleteAnswer: (answerId: string) => Promise<boolean>;
   upvoteAnswer: (answerId: string) => void;
   acceptAnswer: (questionId: string, answerId: string) => void;
-  toggleEventRsvp: (eventId: string) => void;
+  toggleEventRsvp: (eventId: string) => Promise<boolean>;
   submitContentReport: (report: Partial<ContentReport>) => void;
   resolveReport: (reportId: string, action: 'dismiss' | 'action_taken', note?: string) => void;
   markNotificationsAsRead: () => void;
@@ -122,6 +128,7 @@ interface AppContextType {
   reactivateOwnAccount: () => void;
   deleteStudentAccount: (studentId: string, studentName?: string, studentEmail?: string) => Promise<boolean>;
   addEvent: (eventData: Omit<SchoolEvent, 'id' | 'rsvpCount' | 'isRsvpd'>) => void;
+  deleteEvent: (eventId: string) => Promise<boolean>;
   updatePassword: (password: string) => void;
   linkGmailAccount: (gmail: string) => void;
   addNewProfile: (profile: Partial<StudentProfile>) => void;
@@ -208,6 +215,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [questions, setQuestions] = useState<Question[]>(() => (isSupabaseConfigured ? [] : INITIAL_QUESTIONS));
   const [answers, setAnswers] = useState<Answer[]>(() => (isSupabaseConfigured ? [] : INITIAL_ANSWERS));
   const [events, setEvents] = useState<SchoolEvent[]>(() => (isSupabaseConfigured ? [] : INITIAL_EVENTS));
+  const [eventRegistrations, setEventRegistrations] = useState<EventRegistration[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>(() => (isSupabaseConfigured ? [] : INITIAL_CONVERSATIONS));
   const [messages, setMessages] = useState<Message[]>(() => (isSupabaseConfigured ? [] : INITIAL_MESSAGES));
   const [notifications, setNotifications] = useState<AppNotification[]>(() => (isSupabaseConfigured ? [] : INITIAL_NOTIFICATIONS));
@@ -276,7 +284,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         fetchSupabaseNotifications(),
         fetchSupabaseReports(),
         fetchSupabaseContactInquiries(),
-        fetchSupabaseUploads()
+        fetchSupabaseUploads(),
+        fetchSupabaseEventRegistrations()
       ]).then(([
         students,
         projs,
@@ -288,7 +297,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         notifs,
         reps,
         inquiries,
-        uploads
+        uploads,
+        registrations
       ]) => {
         if (students !== null) setAllStudents(students);
         if (projs !== null) setProjects(projs);
@@ -301,6 +311,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (reps !== null) setReports(reps);
         if (inquiries !== null) setContactInquiries(inquiries);
         if (uploads !== null) setUploadedFiles(uploads);
+        if (registrations !== null) setEventRegistrations(registrations);
       });
 
       // 2. Auth Session Check & Auth State Change Listener
@@ -458,6 +469,50 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           }
         })
       );
+
+      unsubscribes.push(
+        subscribeToSupabaseRealtime('events', (payload) => {
+          if (payload.eventType === 'INSERT') {
+            const newEv = payload.new as SchoolEvent;
+            setEvents(prev => (prev.some(e => e.id === newEv.id) ? prev : [newEv, ...prev]));
+          } else if (payload.eventType === 'UPDATE') {
+            const updatedEv = payload.new as SchoolEvent;
+            setEvents(prev => prev.map(e => (e.id === updatedEv.id ? updatedEv : e)));
+          } else if (payload.eventType === 'DELETE') {
+            const deletedId = payload.old?.id;
+            if (deletedId) {
+              setEvents(prev => prev.filter(e => e.id !== deletedId));
+            }
+          }
+        })
+      );
+
+      unsubscribes.push(
+        subscribeToSupabaseRealtime('event_registrations', (payload) => {
+          if (payload.eventType === 'INSERT') {
+            const newReg: EventRegistration = {
+              id: payload.new.id,
+              eventId: payload.new.eventId || payload.new.event_id,
+              userId: payload.new.userId || payload.new.user_id,
+              userName: payload.new.userName || payload.new.user_name,
+              userEmail: payload.new.userEmail || payload.new.user_email,
+              createdAt: payload.new.createdAt || payload.new.created_at
+            };
+            setEventRegistrations(prev => (prev.some(r => r.id === newReg.id) ? prev : [newReg, ...prev]));
+          } else if (payload.eventType === 'DELETE') {
+            const deletedId = payload.old?.id;
+            const deletedEventId = payload.old?.eventId || payload.old?.event_id;
+            const deletedUserId = payload.old?.userId || payload.old?.user_id;
+            setEventRegistrations(prev =>
+              prev.filter(r => {
+                if (deletedId && r.id === deletedId) return false;
+                if (deletedEventId && deletedUserId && r.eventId === deletedEventId && r.userId === deletedUserId) return false;
+                return true;
+              })
+            );
+          }
+        })
+      );
     } else {
       // Fallback: Local Server API Sync
       Promise.all([
@@ -467,8 +522,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         fetch('/api/events').then(r => r.json()).catch(() => []),
         fetch('/api/conversations').then(r => r.json()).catch(() => []),
         fetch('/api/messages').then(r => r.json()).catch(() => []),
-        fetch('/api/notifications').then(r => r.json()).catch(() => [])
-      ]).then(([studentsRes, projectsRes, questionsRes, eventsRes, convRes, msgRes, notifRes]) => {
+        fetch('/api/notifications').then(r => r.json()).catch(() => []),
+        fetch('/api/event-registrations').then(r => r.json()).catch(() => [])
+      ]).then(([studentsRes, projectsRes, questionsRes, eventsRes, convRes, msgRes, notifRes, eventRegsRes]) => {
         if (Array.isArray(studentsRes) && studentsRes.length > 0) setAllStudents(studentsRes);
         if (Array.isArray(projectsRes) && projectsRes.length > 0) setProjects(projectsRes);
         if (Array.isArray(questionsRes) && questionsRes.length > 0) setQuestions(questionsRes);
@@ -476,6 +532,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (Array.isArray(convRes) && convRes.length > 0) setConversations(convRes);
         if (Array.isArray(msgRes) && msgRes.length > 0) setMessages(msgRes);
         if (Array.isArray(notifRes) && notifRes.length > 0) setNotifications(notifRes);
+        if (Array.isArray(eventRegsRes) && eventRegsRes.length > 0) setEventRegistrations(eventRegsRes);
       });
     }
 
@@ -1395,25 +1452,51 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const toggleEventRsvp = (eventId: string) => {
-    let updatedEvt: SchoolEvent | undefined;
-    setEvents(prev =>
-      prev.map(e => {
-        if (e.id === eventId) {
-          const isRsvpd = !e.isRsvpd;
-          updatedEvt = {
-            ...e,
-            isRsvpd,
-            rsvpCount: e.rsvpCount + (isRsvpd ? 1 : -1)
-          };
-          return updatedEvt;
-        }
-        return e;
-      })
+  const toggleEventRsvp = async (eventId: string): Promise<boolean> => {
+    if (!currentUser) {
+      openAuthModal('login');
+      return false;
+    }
+
+    const isRegistered = eventRegistrations.some(
+      r => r.eventId === eventId && (r.userId === currentUser.id || (currentUser.email && r.userEmail === currentUser.email))
     );
 
-    if (isSupabaseConfigured && updatedEvt) {
-      saveSupabaseEvent(updatedEvt);
+    if (isRegistered) {
+      // Deregister: Remove registration record
+      setEventRegistrations(prev =>
+        prev.filter(r => !(r.eventId === eventId && (r.userId === currentUser.id || (currentUser.email && r.userEmail === currentUser.email))))
+      );
+
+      if (isSupabaseConfigured) {
+        await deleteSupabaseEventRegistration(eventId, currentUser.id);
+      } else {
+        fetch(`/api/event-registrations/${eventId}/${currentUser.id}`, { method: 'DELETE' }).catch(() => {});
+      }
+      return true;
+    } else {
+      // Register: Create persistent registration record
+      const newReg: EventRegistration = {
+        id: `reg-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+        eventId,
+        userId: currentUser.id,
+        userName: currentUser.name,
+        userEmail: currentUser.email,
+        createdAt: new Date().toISOString()
+      };
+
+      setEventRegistrations(prev => [newReg, ...prev]);
+
+      if (isSupabaseConfigured) {
+        await saveSupabaseEventRegistration(newReg);
+      } else {
+        fetch('/api/event-registrations', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(newReg)
+        }).catch(() => {});
+      }
+      return true;
     }
   };
 
@@ -1552,14 +1635,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const newEvent: SchoolEvent = {
       ...eventData,
       id: `event-${Date.now()}`,
-      rsvpCount: 1,
-      isRsvpd: true
+      rsvpCount: 0,
+      isRsvpd: false
     };
     setEvents(prev => [newEvent, ...prev]);
 
     if (isSupabaseConfigured) {
       saveSupabaseEvent(newEvent);
     }
+  };
+
+  const deleteEvent = async (eventId: string): Promise<boolean> => {
+    if (!currentUser) return false;
+    const canDelete = currentUser.role === 'teacher' || currentUser.role === 'admin' || currentUser.role === 'developer';
+    if (!canDelete) return false;
+
+    setEvents(prev => prev.filter(e => e.id !== eventId));
+    setEventRegistrations(prev => prev.filter(r => r.eventId !== eventId));
+
+    if (isSupabaseConfigured) {
+      await deleteSupabaseEvent(eventId);
+    } else {
+      fetch(`/api/events/${eventId}`, { method: 'DELETE' }).catch(() => {});
+    }
+    return true;
   };
 
   const updatePassword = (newPassword: string) => {
@@ -2024,6 +2123,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     ? messages.filter(m => m.senderId !== currentUser.id && !m.readBy?.includes(currentUser.id)).length
     : 0;
 
+  // Dynamically compute exact registrant count and user RSVP state from eventRegistrations
+  const dynamicEvents: SchoolEvent[] = events.map(evt => {
+    const regs = eventRegistrations.filter(r => r.eventId === evt.id);
+    const count = regs.length;
+    const isUserRsvpd = Boolean(
+      currentUser &&
+      regs.some(r => r.userId === currentUser.id || (currentUser.email && r.userEmail === currentUser.email))
+    );
+    return {
+      ...evt,
+      rsvpCount: count,
+      isRsvpd: isUserRsvpd
+    };
+  });
+
   return (
     <AppContext.Provider
       value={{
@@ -2032,7 +2146,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         projects,
         questions,
         answers,
-        events,
+        events: dynamicEvents,
+        eventRegistrations,
         notifications,
         conversations,
         messages,
@@ -2088,6 +2203,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         reactivateOwnAccount,
         deleteStudentAccount,
         addEvent,
+        deleteEvent,
         updatePassword,
         linkGmailAccount,
         addNewProfile,
