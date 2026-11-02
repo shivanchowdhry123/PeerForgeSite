@@ -2177,26 +2177,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     if (isSupabaseConfigured) {
       await saveSupabaseStudent(newProfile);
-      return {
-        success: true,
-        requiresEmailConfirmation: true,
-        email: cleanEmail,
-        message: data.role === 'teacher'
-          ? `Faculty account registered! Your account is pending verification by an existing faculty member. Administrative features will unlock once approved.`
-          : `Account created! We've sent a verification email to ${cleanEmail}. Please check your inbox and click the confirmation link, then sign in to your account.`,
-        user: newProfile
-      };
     }
-
-    setCurrentUser(newProfile);
-    setIsAuthenticated(true);
-    persistSession(newProfile);
 
     return {
       success: true,
+      requiresEmailConfirmation: true,
+      email: cleanEmail,
       message: data.role === 'teacher'
         ? `Faculty account registered! Your account is pending verification by an existing faculty member. Administrative features will unlock once approved.`
-        : `Welcome to OPG Connect, ${cleanName}! Your profile has been initialized.`,
+        : `Account created! We've sent a verification email to ${cleanEmail}. Please check your inbox and click the confirmation link, then sign in to your account.`,
       user: newProfile
     };
   };
