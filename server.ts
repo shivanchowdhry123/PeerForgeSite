@@ -1,4 +1,5 @@
 import express, { type Request, type Response } from 'express';
+import http from 'http';
 import dotenv from 'dotenv';
 import path from 'path';
 import fs from 'fs';
@@ -1221,12 +1222,16 @@ async function startServer() {
     process.env.npm_lifecycle_event === 'start' ||
     (!process.env.npm_lifecycle_event && fs.existsSync(path.resolve(__dirname, 'dist', 'index.html')));
 
+  const httpServer = http.createServer(app);
+
   if (!isProduction) {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: {
         middlewareMode: true,
-        hmr: false
+        hmr: {
+          server: httpServer
+        }
       },
       appType: 'spa'
     });
@@ -1242,11 +1247,11 @@ async function startServer() {
   }
 
   // Primary listen on port 3000 (standard AI Studio port proxied by nginx)
-  const server = app.listen(PORT, '0.0.0.0', () => {
+  httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`PeerForge OPG World School full-stack server running on http://0.0.0.0:${PORT}`);
   });
 
-  server.on('error', (err: any) => {
+  httpServer.on('error', (err: any) => {
     console.error(`Server listen error on port ${PORT}:`, err?.message || err);
   });
 
