@@ -330,7 +330,7 @@ app.put('/api/students/:id', (req: Request, res: Response) => {
 });
 
 app.delete('/api/students/:id', (req: Request, res: Response) => {
-  const target = req.params.id.toLowerCase();
+  const target = String(req.params.id || '').toLowerCase();
   const initialLen = db.students.length;
   db.students = db.students.filter(
     s => s.id.toLowerCase() !== target &&

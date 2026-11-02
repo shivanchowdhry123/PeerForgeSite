@@ -66,13 +66,77 @@ export async function fetchSupabaseStudents(): Promise<StudentProfile[] | null> 
     const { data, error } = await supabase.from('students').select('*');
     if (error) throw error;
     if (!data) return [];
-    return data.map((row: any) => ({
-      ...row,
-      defaultTheme: row.defaultTheme || row.default_theme || row.privacySettings?.defaultTheme || 'light'
-    })) as StudentProfile[];
+    return data.map((row: any) => {
+      const isApproved =
+        typeof row.is_approved === 'boolean'
+          ? row.is_approved
+          : typeof row.isApproved === 'boolean'
+          ? row.isApproved
+          : row.role === 'teacher'
+          ? false
+          : true;
+
+      return {
+        ...row,
+        isApproved,
+        defaultTheme: row.defaultTheme || row.default_theme || row.privacySettings?.defaultTheme || 'light'
+      };
+    }) as StudentProfile[];
   } catch (err) {
     console.warn('Supabase fetch students error:', err);
     return null;
+  }
+}
+
+// --- TEACHER ACCOUNT APPROVALS ---
+export async function fetchSupabasePendingFaculty(): Promise<StudentProfile[] | null> {
+  if (!isSupabaseConfigured) return null;
+  try {
+    const { data, error } = await supabase
+      .from('students')
+      .select('*')
+      .eq('role', 'teacher');
+    if (error) throw error;
+    if (!data) return [];
+    return data
+      .filter((row: any) => row.is_approved === false || row.isApproved === false)
+      .map((row: any) => ({
+        ...row,
+        isApproved: false,
+        defaultTheme: row.defaultTheme || row.default_theme || row.privacySettings?.defaultTheme || 'light'
+      })) as StudentProfile[];
+  } catch (err) {
+    console.warn('Supabase fetch pending faculty error:', err);
+    return null;
+  }
+}
+
+export async function updateSupabaseFacultyApproval(teacherId: string, isApproved: boolean): Promise<boolean> {
+  if (!isSupabaseConfigured) return false;
+  try {
+    const { error: err1 } = await supabase
+      .from('students')
+      .update({ is_approved: isApproved, isApproved: isApproved })
+      .eq('id', teacherId);
+    if (!err1) return true;
+
+    const { error: err2 } = await supabase
+      .from('students')
+      .update({ is_approved: isApproved })
+      .eq('id', teacherId);
+    if (!err2) return true;
+
+    const { error: err3 } = await supabase
+      .from('students')
+      .update({ isApproved: isApproved })
+      .eq('id', teacherId);
+    if (!err3) return true;
+
+    console.warn('Supabase update faculty approval error:', err1 || err2 || err3);
+    return false;
+  } catch (err) {
+    console.warn('Supabase update faculty approval error:', err);
+    return false;
   }
 }
 
@@ -344,7 +408,11 @@ export async function deleteSupabaseEvent(eventId: string): Promise<boolean> {
     const { error } = await supabase.from('events').delete().eq('id', eventId);
     if (error) throw error;
     // Also clean up any registrations for this event
-    await supabase.from('event_registrations').delete().eq('event_id', eventId).catch(() => {});
+    try {
+      await supabase.from('event_registrations').delete().eq('event_id', eventId);
+    } catch {
+      // Ignore cleanup error
+    }
     return true;
   } catch (err) {
     console.warn('Supabase delete event error:', err);

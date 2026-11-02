@@ -39,6 +39,7 @@ export interface StudentProfile {
     showGradeToAll: boolean;
     allowDirectMessages: 'anyone' | 'project_partners' | 'verified_only';
     showAchievements: boolean;
+    defaultTheme?: 'light' | 'dark' | 'system';
   };
   completeness: number;
   isVerified: boolean;

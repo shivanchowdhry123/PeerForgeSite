@@ -49,8 +49,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ onCloseMobile }) => {
     { id: 'contact', label: 'Contact & Support', icon: Mail }
   ];
 
-  if (currentUser?.role === 'teacher') {
-    navItems.push({ id: 'admin', label: 'Faculty Console', icon: ShieldCheck });
+  if (currentUser?.role === 'developer' || currentUser?.role === 'admin' || currentUser?.role === 'teacher') {
+    const isPending = currentUser?.role === 'teacher' && !currentUser?.isApproved;
+    navItems.push({
+      id: 'admin',
+      label: isPending ? 'Faculty Console (Pending)' : 'Faculty Console',
+      icon: ShieldCheck
+    });
   }
 
   const handleNavClick = (id: string) => {

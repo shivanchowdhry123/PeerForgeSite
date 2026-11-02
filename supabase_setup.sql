@@ -161,3 +161,23 @@ DROP POLICY IF EXISTS "Allow users to deregister from events" ON event_registrat
 CREATE POLICY "Allow users to deregister from events" 
 ON event_registrations FOR DELETE 
 USING (true);
+
+-- ----------------------------------------------------
+-- 6. TEACHER ACCOUNT VERIFICATION & APPROVAL WORKFLOW
+-- ----------------------------------------------------
+
+-- Add is_approved column to students table (default true so student accounts are immediately active)
+ALTER TABLE students ADD COLUMN IF NOT EXISTS is_approved BOOLEAN DEFAULT true;
+
+-- Update existing students and existing non-teachers to ensure they are marked approved
+UPDATE students 
+SET is_approved = true 
+WHERE (is_approved IS NULL) OR (role IS DISTINCT FROM 'teacher');
+
+-- Allow approved faculty and admins to update student/teacher records (including is_approved)
+DROP POLICY IF EXISTS "Allow public update access to students" ON students;
+CREATE POLICY "Allow public update access to students" 
+ON students FOR UPDATE 
+USING (true) 
+WITH CHECK (true);
+

@@ -15,12 +15,17 @@ import {
   Mail,
   KeyRound,
   EyeOff,
-  User
+  User,
+  UserCheck,
+  UserX
 } from 'lucide-react';
 
 export const SettingsView: React.FC = () => {
   const {
     currentUser,
+    allStudents,
+    approveFacultyAccount,
+    rejectFacultyAccount,
     updateCurrentUserProfile,
     updatePassword,
     linkGmailAccount,
@@ -37,6 +42,12 @@ export const SettingsView: React.FC = () => {
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [deactivationFeedback, setDeactivationFeedback] = useState<string | null>(null);
+
+  // Faculty verification state
+  const [approvingTeacherId, setApprovingTeacherId] = useState<string | null>(null);
+  const [confirmRejectTeacherId, setConfirmRejectTeacherId] = useState<string | null>(null);
+  const [rejectingTeacherId, setRejectingTeacherId] = useState<string | null>(null);
+  const [facultyApprovalNotice, setFacultyApprovalNotice] = useState<string | null>(null);
 
   // Safe fallback for privacySettings
   const currentPrivacy = currentUser?.privacySettings || {
@@ -152,6 +163,43 @@ export const SettingsView: React.FC = () => {
     setTimeout(() => setSavedSuccess(false), 2000);
   };
 
+  const isApprovedFacultyOrAdmin =
+    currentUser &&
+    (currentUser.role === 'developer' ||
+      currentUser.role === 'admin' ||
+      (currentUser.role === 'teacher' && currentUser.isApproved));
+
+  const pendingTeachers = isApprovedFacultyOrAdmin
+    ? (allStudents || []).filter(s => s.role === 'teacher' && !s.isApproved)
+    : [];
+
+  const handleApproveTeacherAccount = async (teacher: typeof allStudents[0]) => {
+    setApprovingTeacherId(teacher.id);
+    try {
+      const ok = await approveFacultyAccount(teacher.id);
+      if (ok) {
+        setFacultyApprovalNotice(`Faculty account for ${teacher.name} approved successfully!`);
+        setTimeout(() => setFacultyApprovalNotice(null), 4000);
+      }
+    } finally {
+      setApprovingTeacherId(null);
+    }
+  };
+
+  const handleRejectTeacherAccount = async (teacher: typeof allStudents[0]) => {
+    setRejectingTeacherId(teacher.id);
+    try {
+      const ok = await rejectFacultyAccount(teacher.id);
+      if (ok) {
+        setFacultyApprovalNotice(`Faculty application for ${teacher.name} has been rejected.`);
+        setTimeout(() => setFacultyApprovalNotice(null), 4000);
+      }
+    } finally {
+      setRejectingTeacherId(null);
+      setConfirmRejectTeacherId(null);
+    }
+  };
+
   return (
     <div className="space-y-6 max-w-4xl mx-auto pb-12">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -171,6 +219,137 @@ export const SettingsView: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Faculty Console — Pending Teacher Approvals (Visible to approved faculty & admins) */}
+      {isApprovedFacultyOrAdmin && (
+        <div className="p-6 rounded-3xl bg-[var(--bg-surface)] border border-amber-200 dark:border-amber-900/60 space-y-4 shadow-xs">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                <h2 className="text-base font-bold text-[var(--text-primary)] flex items-center gap-2">
+                  <UserCheck className="w-4 h-4 text-amber-600" />
+                  <span>Pending Teacher Approvals</span>
+                </h2>
+                {pendingTeachers.length > 0 && (
+                  <span className="px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 text-[10px] font-bold">
+                    {pendingTeachers.length} Pending
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-[var(--text-muted)] mt-1">
+                Faculty verification console: review new faculty registrations. Once approved, teachers can publish campus notices, manage events, and access faculty tools.
+              </p>
+            </div>
+          </div>
+
+          {facultyApprovalNotice && (
+            <div className="p-3 rounded-2xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200 text-xs flex items-center justify-between animate-in fade-in">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span className="font-medium">{facultyApprovalNotice}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setFacultyApprovalNotice(null)}
+                className="text-[11px] underline font-semibold text-emerald-700 dark:text-emerald-300 cursor-pointer"
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
+
+          {pendingTeachers.length === 0 ? (
+            <div className="p-6 rounded-2xl bg-[var(--bg-subtle)] border border-[var(--border-color)] text-center space-y-1">
+              <CheckCircle2 className="w-5 h-5 text-emerald-600 mx-auto" />
+              <div className="text-xs font-bold text-[var(--text-primary)]">All Faculty Registrations Verified</div>
+              <p className="text-[11px] text-[var(--text-muted)]">
+                There are no pending teacher approvals requiring action at this time.
+              </p>
+            </div>
+          ) : (
+            <div className="divide-y divide-[var(--border-color)] rounded-2xl border border-[var(--border-color)] bg-[var(--bg-subtle)] overflow-hidden">
+              {pendingTeachers.map(teacher => (
+                <div
+                  key={teacher.id}
+                  className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 bg-[var(--bg-surface)] hover:bg-[var(--bg-subtle)] transition-colors"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <img
+                      src={teacher.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${teacher.id}`}
+                      alt={teacher.name}
+                      className="w-10 h-10 rounded-2xl object-cover shrink-0 border border-[var(--border-color)]"
+                    />
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs font-bold text-[var(--text-primary)] truncate">
+                          {teacher.name}
+                        </span>
+                        <span className="px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 text-[10px] font-semibold">
+                          Pending Faculty
+                        </span>
+                        <span className="text-[10px] text-[var(--text-muted)]">
+                          {teacher.grade || 'Faculty Member'}
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-[var(--text-secondary)] truncate">
+                        {teacher.email}
+                      </div>
+                      <div className="text-[10px] text-[var(--text-muted)] mt-0.5">
+                        Registered: {teacher.joinedDate ? new Date(teacher.joinedDate).toLocaleDateString() : 'Recent'}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0 self-end md:self-center">
+                    {confirmRejectTeacherId === teacher.id ? (
+                      <div className="flex items-center gap-2 p-1.5 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800">
+                        <span className="text-[11px] text-rose-700 dark:text-rose-300 font-medium">Reject & remove?</span>
+                        <button
+                          type="button"
+                          onClick={() => handleRejectTeacherAccount(teacher)}
+                          disabled={rejectingTeacherId === teacher.id}
+                          className="px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-[10px] font-bold transition-colors cursor-pointer disabled:opacity-50"
+                        >
+                          {rejectingTeacherId === teacher.id ? 'Removing...' : 'Confirm Reject'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setConfirmRejectTeacherId(null)}
+                          className="px-2 py-1 rounded-lg bg-[var(--bg-surface)] hover:bg-[var(--bg-main)] text-[var(--text-muted)] text-[10px] font-medium border border-[var(--border-color)] cursor-pointer"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => handleApproveTeacherAccount(teacher)}
+                          disabled={approvingTeacherId === teacher.id}
+                          className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer disabled:opacity-50"
+                        >
+                          <UserCheck className="w-3.5 h-3.5" />
+                          <span>{approvingTeacherId === teacher.id ? 'Approving...' : 'Approve Account'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setConfirmRejectTeacherId(teacher.id)}
+                          disabled={approvingTeacherId === teacher.id}
+                          className="px-3 py-1.5 rounded-xl bg-[var(--bg-surface)] hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/40 text-[var(--text-muted)] border border-[var(--border-color)] hover:border-rose-300 text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
+                        >
+                          <UserX className="w-3.5 h-3.5" />
+                          <span>Reject / Remove</span>
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Default Theme Appearance */}
       <div className="p-6 rounded-3xl bg-[var(--bg-surface)] border border-[var(--border-color)] space-y-4 shadow-xs">

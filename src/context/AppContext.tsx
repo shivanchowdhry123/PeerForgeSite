@@ -48,6 +48,7 @@ import {
   fetchSupabaseEventRegistrations,
   saveSupabaseEventRegistration,
   deleteSupabaseEventRegistration,
+  updateSupabaseFacultyApproval,
   saveSupabaseNotification,
   saveSupabaseReport,
   saveSupabaseContactInquiry,
@@ -127,6 +128,8 @@ interface AppContextType {
   deactivateOwnAccount: () => void;
   reactivateOwnAccount: () => void;
   deleteStudentAccount: (studentId: string, studentName?: string, studentEmail?: string) => Promise<boolean>;
+  approveFacultyAccount: (teacherId: string) => Promise<boolean>;
+  rejectFacultyAccount: (teacherId: string) => Promise<boolean>;
   addEvent: (eventData: Omit<SchoolEvent, 'id' | 'rsvpCount' | 'isRsvpd'>) => void;
   deleteEvent: (eventId: string) => Promise<boolean>;
   updatePassword: (password: string) => void;
@@ -189,6 +192,8 @@ interface AppContextType {
   uploadFile: (file: File, category: string, description?: string, projectId?: string) => Promise<{ success: boolean; file?: UploadedFile; error?: string }>;
   deleteUploadedFile: (id: string) => Promise<boolean>;
   refreshUploadedFiles: () => Promise<void>;
+  activeConversationId: string | null;
+  setActiveConversationId: (id: string | null) => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -196,8 +201,18 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 export const normalizeStudentProfile = (raw: any): StudentProfile => {
   if (!raw) return raw;
   const theme = raw.defaultTheme || raw.default_theme || raw.privacySettings?.defaultTheme || 'light';
+  const isApproved =
+    typeof raw.is_approved === 'boolean'
+      ? raw.is_approved
+      : typeof raw.isApproved === 'boolean'
+      ? raw.isApproved
+      : raw.role === 'teacher'
+      ? false
+      : true;
+
   return {
     ...raw,
+    isApproved,
     defaultTheme: theme
   };
 };
@@ -327,7 +342,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             const student = normalizeStudentProfile(sbStudent);
             setCurrentUser(student);
             setIsAuthenticated(true);
-            setTheme(student.defaultTheme || 'light');
+            const resolvedTheme =
+              student.defaultTheme === 'dark'
+                ? 'dark'
+                : student.defaultTheme === 'light'
+                ? 'light'
+                : typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches
+                ? 'dark'
+                : 'light';
+            setTheme(resolvedTheme);
           }
         }
       });
@@ -348,7 +371,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             const student = normalizeStudentProfile(sbStudent);
             setCurrentUser(student);
             setIsAuthenticated(true);
-            setTheme(student.defaultTheme || 'light');
+            const resolvedTheme =
+              student.defaultTheme === 'dark'
+                ? 'dark'
+                : student.defaultTheme === 'light'
+                ? 'light'
+                : typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches
+                ? 'dark'
+                : 'light';
+            setTheme(resolvedTheme);
           }
         }
       });
@@ -1632,6 +1663,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const addEvent = (eventData: Omit<SchoolEvent, 'id' | 'rsvpCount' | 'isRsvpd'>) => {
+    // Only approved faculty, admins, or developers can publish events
+    const canPublish = currentUser && (currentUser.role === 'developer' || currentUser.role === 'admin' || (currentUser.role === 'teacher' && currentUser.isApproved));
+    if (!canPublish) {
+      console.warn('Action restricted: Only verified and approved faculty members can publish events.');
+      return;
+    }
+
     const newEvent: SchoolEvent = {
       ...eventData,
       id: `event-${Date.now()}`,
@@ -1647,7 +1685,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const deleteEvent = async (eventId: string): Promise<boolean> => {
     if (!currentUser) return false;
-    const canDelete = currentUser.role === 'teacher' || currentUser.role === 'admin' || currentUser.role === 'developer';
+    const canDelete = currentUser.role === 'developer' || currentUser.role === 'admin' || (currentUser.role === 'teacher' && currentUser.isApproved);
     if (!canDelete) return false;
 
     setEvents(prev => prev.filter(e => e.id !== eventId));
@@ -1659,6 +1697,39 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       fetch(`/api/events/${eventId}`, { method: 'DELETE' }).catch(() => {});
     }
     return true;
+  };
+
+  const approveFacultyAccount = async (teacherId: string): Promise<boolean> => {
+    if (!currentUser) return false;
+    const isElevated = currentUser.role === 'developer' || currentUser.role === 'admin' || (currentUser.role === 'teacher' && currentUser.isApproved);
+    if (!isElevated) return false;
+
+    setAllStudents(prev =>
+      prev.map(s => (s.id === teacherId ? { ...s, isApproved: true } : s))
+    );
+
+    if (currentUser.id === teacherId) {
+      setCurrentUser(prev => (prev ? { ...prev, isApproved: true } : prev));
+    }
+
+    if (isSupabaseConfigured) {
+      await updateSupabaseFacultyApproval(teacherId, true);
+    } else {
+      fetch(`/api/students/${teacherId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isApproved: true, is_approved: true })
+      }).catch(() => {});
+    }
+    return true;
+  };
+
+  const rejectFacultyAccount = async (teacherId: string): Promise<boolean> => {
+    if (!currentUser) return false;
+    const isElevated = currentUser.role === 'developer' || currentUser.role === 'admin' || (currentUser.role === 'teacher' && currentUser.isApproved);
+    if (!isElevated) return false;
+
+    return await deleteStudentAccount(teacherId);
   };
 
   const updatePassword = (newPassword: string) => {
@@ -1779,7 +1850,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const loginWithGmail = async (
     gmail: string,
     password?: string
-  ): Promise<{ success: boolean; message: string; user?: StudentProfile }> => {
+  ): Promise<{
+    success: boolean;
+    message: string;
+    user?: StudentProfile;
+    isEmailUnconfirmed?: boolean;
+    unconfirmedEmail?: string;
+  }> => {
     const cleanEmail = gmail.trim().toLowerCase();
     if (!cleanEmail) {
       return { success: false, message: 'Please enter your school or Gmail ID.' };
@@ -1889,7 +1966,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     setCurrentUser(profileToLogin);
     setIsAuthenticated(true);
-    setTheme(profileToLogin.defaultTheme || 'light');
+    const resolvedTheme =
+      profileToLogin.defaultTheme === 'dark'
+        ? 'dark'
+        : profileToLogin.defaultTheme === 'light'
+        ? 'light'
+        : typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches
+        ? 'dark'
+        : 'light';
+    setTheme(resolvedTheme);
     setAllStudents(prev => {
       const exists = prev.some(s => s.id === profileToLogin!.id);
       return exists ? prev.map(s => (s.id === profileToLogin!.id ? profileToLogin! : s)) : [profileToLogin!, ...prev];
@@ -1912,7 +1997,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     password?: string;
     bio?: string;
     skills?: string[];
-  }): Promise<{ success: boolean; message: string; user?: StudentProfile }> => {
+  }): Promise<{
+    success: boolean;
+    message: string;
+    user?: StudentProfile;
+    requiresEmailConfirmation?: boolean;
+    email?: string;
+  }> => {
     const cleanEmail = data.email.trim().toLowerCase();
     const cleanName = data.name.trim();
 
@@ -2005,7 +2096,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       },
       completeness: 90,
       isVerified: true,
-      isApproved: true,
+      isApproved: data.role === 'teacher' ? false : true,
       joinedDate: new Date().toISOString().split('T')[0]
     };
 
@@ -2017,7 +2108,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         success: true,
         requiresEmailConfirmation: true,
         email: cleanEmail,
-        message: `Account created! We've sent a verification email to ${cleanEmail}. Please check your inbox and click the confirmation link, then sign in to your account.`,
+        message: data.role === 'teacher'
+          ? `Faculty account registered! Your account is pending verification by an existing faculty member. Administrative features will unlock once approved.`
+          : `Account created! We've sent a verification email to ${cleanEmail}. Please check your inbox and click the confirmation link, then sign in to your account.`,
         user: newProfile
       };
     }
@@ -2025,7 +2118,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setCurrentUser(newProfile);
     setIsAuthenticated(true);
 
-    return { success: true, message: `Account created successfully! Welcome to PeerForge, ${cleanName}.`, user: newProfile };
+    return {
+      success: true,
+      message: data.role === 'teacher'
+        ? `Faculty account registered! Your account is pending verification by an existing faculty member. Administrative features will unlock once approved.`
+        : `Welcome to OPG Connect, ${cleanName}! Your profile has been initialized.`,
+      user: newProfile
+    };
   };
 
   const resendVerificationEmail = async (email: string): Promise<{ success: boolean; message: string }> => {
@@ -2202,6 +2301,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         deactivateOwnAccount,
         reactivateOwnAccount,
         deleteStudentAccount,
+        approveFacultyAccount,
+        rejectFacultyAccount,
         addEvent,
         deleteEvent,
         updatePassword,

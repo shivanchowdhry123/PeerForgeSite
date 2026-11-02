@@ -85,9 +85,12 @@ export function validateFileUploadLimits(file: { size: number; name: string }): 
  */
 export function sanitizeStudentForDb(student: StudentProfile): Record<string, any> {
   const themeVal = student.defaultTheme || (student as any).default_theme || student.privacySettings?.defaultTheme || 'light';
+  const approvedVal = typeof student.isApproved === 'boolean' ? student.isApproved : (student.role === 'teacher' ? false : true);
 
   return {
     ...student,
+    is_approved: approvedVal,
+    isApproved: approvedVal,
     default_theme: themeVal,
     defaultTheme: themeVal,
     privacySettings: {

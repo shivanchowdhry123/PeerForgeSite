@@ -27,7 +27,8 @@ import {
   HelpCircle,
   Menu,
   X,
-  AlertTriangle
+  AlertTriangle,
+  ShieldAlert
 } from 'lucide-react';
 
 const AmbientBackground: React.FC = () => {
@@ -158,6 +159,19 @@ const MainLayout: React.FC = () => {
               >
                 Reactivate Account Now
               </button>
+            </div>
+          )}
+
+          {/* Pending Teacher Verification Notice Banner */}
+          {currentUser?.role === 'teacher' && !currentUser?.isApproved && (
+            <div className="mb-6 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-start sm:items-center gap-3 text-xs text-amber-900 dark:text-amber-200 backdrop-blur-sm animate-in fade-in">
+              <ShieldAlert className="w-5 h-5 text-amber-500 shrink-0 mt-0.5 sm:mt-0" />
+              <div className="flex-1">
+                <span className="font-bold block sm:inline mr-1.5">Faculty Verification in Progress:</span>
+                <span className="text-amber-800 dark:text-amber-300">
+                  Your faculty account is pending verification by an existing faculty member. Administrative features will unlock once approved.
+                </span>
+              </div>
             </div>
           )}
 

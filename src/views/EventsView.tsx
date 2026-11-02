@@ -28,7 +28,7 @@ export const EventsView: React.FC = () => {
   const [isDeletingId, setIsDeletingId] = useState<string | null>(null);
 
   // New Event Form State
-  const canPublish = currentUser && (currentUser.role === 'developer' || currentUser.role === 'teacher' || currentUser.role === 'admin');
+  const canPublish = currentUser && (currentUser.role === 'developer' || currentUser.role === 'admin' || (currentUser.role === 'teacher' && currentUser.isApproved));
   const roleLabel = currentUser?.role === 'developer' ? 'App Developer' : currentUser?.role === 'teacher' ? 'Teacher / Faculty' : 'Admin';
 
   const [title, setTitle] = useState('');

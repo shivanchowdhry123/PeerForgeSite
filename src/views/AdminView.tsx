@@ -9,7 +9,10 @@ import {
   Clock,
   CheckCircle,
   Send,
-  HelpCircle
+  HelpCircle,
+  ShieldAlert,
+  UserCheck,
+  UserX
 } from 'lucide-react';
 
 export const AdminView: React.FC = () => {
@@ -19,24 +22,56 @@ export const AdminView: React.FC = () => {
     projects,
     questions,
     deleteStudentAccount,
+    approveFacultyAccount,
+    rejectFacultyAccount,
     contactInquiries,
     resolveContactInquiry
   } = useApp();
 
-  const [activeTab, setActiveTab] = useState<'students' | 'contact' | 'audit'>('students');
+  const pendingTeachers = (allStudents || []).filter(s => s.role === 'teacher' && !s.isApproved);
+
+  const [activeTab, setActiveTab] = useState<'approvals' | 'students' | 'contact' | 'audit'>(() =>
+    pendingTeachers.length > 0 ? 'approvals' : 'students'
+  );
   const [replyTextMap, setReplyTextMap] = useState<Record<string, string>>({});
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [deleteNotice, setDeleteNotice] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState<string | null>(null);
+  const [approvingId, setApprovingId] = useState<string | null>(null);
+  const [confirmRejectId, setConfirmRejectId] = useState<string | null>(null);
+  const [rejectingId, setRejectingId] = useState<string | null>(null);
+  const [approvalFeedback, setApprovalFeedback] = useState<string | null>(null);
 
-  // Verify access
-  if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'moderator' && currentUser.role !== 'developer' && currentUser.role !== 'teacher')) {
+  // Pending faculty verification banner for teachers awaiting approval
+  if (currentUser?.role === 'teacher' && !currentUser?.isApproved) {
+    return (
+      <div className="p-12 text-center rounded-3xl bg-[var(--bg-surface)] border border-amber-300 dark:border-amber-800/60 max-w-lg mx-auto space-y-4 animate-in fade-in">
+        <div className="w-14 h-14 rounded-2xl bg-amber-50 dark:bg-amber-950/60 text-amber-600 flex items-center justify-center mx-auto">
+          <ShieldAlert className="w-8 h-8" />
+        </div>
+        <h2 className="text-lg font-bold text-[var(--text-primary)]">Faculty Verification in Progress</h2>
+        <p className="text-xs text-[var(--text-muted)] leading-relaxed">
+          Your faculty account is pending verification by an existing faculty member. Administrative features will unlock once approved.
+        </p>
+      </div>
+    );
+  }
+
+  // Verify access for approved faculty, admins, or developers
+  const isApprovedFacultyOrAdmin =
+    currentUser &&
+    (currentUser.role === 'admin' ||
+      currentUser.role === 'moderator' ||
+      currentUser.role === 'developer' ||
+      (currentUser.role === 'teacher' && currentUser.isApproved));
+
+  if (!isApprovedFacultyOrAdmin) {
     return (
       <div className="p-12 text-center rounded-3xl bg-[var(--bg-surface)] border border-[var(--border-color)] max-w-lg mx-auto space-y-3">
         <ShieldCheck className="w-10 h-10 text-blue-500 mx-auto" />
         <h2 className="text-base font-bold text-[var(--text-primary)]">Developer & Faculty Restricted</h2>
         <p className="text-xs text-[var(--text-muted)]">
-          The Administration and Verification console is reserved for App Developers and Faculty Mentors. Please sign in with your developer or teacher Gmail account to access.
+          The Administration and Verification console is reserved for verified Faculty Mentors and App Developers. Please sign in with your verified faculty or developer account.
         </p>
       </div>
     );
@@ -57,19 +92,46 @@ export const AdminView: React.FC = () => {
 
   const newInquiriesCount = (contactInquiries || []).filter(i => i.status === 'new').length;
 
+  const handleApproveTeacher = async (teacher: typeof allStudents[0]) => {
+    setApprovingId(teacher.id);
+    try {
+      const ok = await approveFacultyAccount(teacher.id);
+      if (ok) {
+        setApprovalFeedback(`Faculty account for ${teacher.name} approved successfully!`);
+        setTimeout(() => setApprovalFeedback(null), 4000);
+      }
+    } finally {
+      setApprovingId(null);
+    }
+  };
+
+  const handleRejectTeacher = async (teacher: typeof allStudents[0]) => {
+    setRejectingId(teacher.id);
+    try {
+      const ok = await rejectFacultyAccount(teacher.id);
+      if (ok) {
+        setApprovalFeedback(`Faculty application for ${teacher.name} has been rejected and removed.`);
+        setTimeout(() => setApprovalFeedback(null), 4000);
+      }
+    } finally {
+      setRejectingId(null);
+      setConfirmRejectId(null);
+    }
+  };
+
   return (
     <div className="space-y-6 max-w-6xl mx-auto pb-12">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-purple-100 dark:bg-purple-950 text-purple-800 dark:text-purple-300 text-[11px] font-semibold mb-1">
             <ShieldCheck className="w-3.5 h-3.5" />
-            <span>OPG World School Administration Console</span>
+            <span>OPG World School Faculty & Administration Console</span>
           </div>
           <h1 className="text-2xl font-extrabold text-[var(--text-primary)] tracking-tight">
             School Community Administration
           </h1>
           <p className="text-xs sm:text-sm text-[var(--text-secondary)]">
-            Verify student rosters, manage support inquiries, and audit platform activity
+            Verify faculty registrations, manage student rosters, and review support inquiries
           </p>
         </div>
 
@@ -81,7 +143,17 @@ export const AdminView: React.FC = () => {
       {/* Aggregate Metrics Grid */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="p-4 rounded-3xl bg-[var(--bg-surface)] border border-[var(--border-color)] space-y-1">
-          <span className="text-xs text-[var(--text-muted)] font-medium">Registered Students</span>
+          <span className="text-xs text-[var(--text-muted)] font-medium">Pending Faculty</span>
+          <div className="text-2xl font-extrabold text-amber-600 num-tabular">
+            {pendingTeachers.length}
+          </div>
+          <span className="text-[10px] text-amber-700 dark:text-amber-400 font-medium">
+            {pendingTeachers.length > 0 ? 'Action Required' : 'All Verified'}
+          </span>
+        </div>
+
+        <div className="p-4 rounded-3xl bg-[var(--bg-surface)] border border-[var(--border-color)] space-y-1">
+          <span className="text-xs text-[var(--text-muted)] font-medium">Verified Students</span>
           <div className="text-2xl font-extrabold text-[var(--text-primary)] num-tabular">
             {allStudents.filter(s => s.role === 'student').length}
           </div>
@@ -103,21 +175,30 @@ export const AdminView: React.FC = () => {
           </div>
           <span className="text-[10px] text-blue-600 font-medium">Recruiting & Active</span>
         </div>
-
-        <div className="p-4 rounded-3xl bg-[var(--bg-surface)] border border-[var(--border-color)] space-y-1">
-          <span className="text-xs text-[var(--text-muted)] font-medium">Academic Questions</span>
-          <div className="text-2xl font-extrabold text-[var(--text-primary)] num-tabular">
-            {questions.length}
-          </div>
-          <span className="text-[10px] text-purple-600 font-medium">Peer Collaboration</span>
-        </div>
       </div>
 
       {/* Console Tab Selector */}
       <div className="flex items-center gap-2 border-b border-[var(--border-color)] pb-2 text-xs font-semibold overflow-x-auto">
         <button
+          onClick={() => setActiveTab('approvals')}
+          className={`px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap flex items-center gap-1.5 cursor-pointer ${
+            activeTab === 'approvals'
+              ? 'bg-amber-100 dark:bg-amber-950/60 text-amber-900 dark:text-amber-200 font-bold'
+              : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+          }`}
+        >
+          <UserCheck className="w-3.5 h-3.5 text-amber-600" />
+          <span>Pending Teacher Approvals</span>
+          {pendingTeachers.length > 0 && (
+            <span className="px-1.5 py-0.2 rounded-full bg-amber-600 text-white text-[10px] font-bold">
+              {pendingTeachers.length}
+            </span>
+          )}
+        </button>
+
+        <button
           onClick={() => setActiveTab('students')}
-          className={`px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap ${
+          className={`px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap cursor-pointer ${
             activeTab === 'students'
               ? 'bg-purple-100 dark:bg-purple-950/60 text-purple-800 dark:text-purple-300'
               : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
@@ -152,6 +233,133 @@ export const AdminView: React.FC = () => {
           Audit Logs
         </button>
       </div>
+
+      {/* Tab 0: Pending Teacher Approvals */}
+      {activeTab === 'approvals' && (
+        <div className="rounded-3xl bg-[var(--bg-surface)] border border-[var(--border-color)] overflow-hidden space-y-4">
+          <div className="p-4 border-b border-[var(--border-color)] flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-[var(--text-primary)] block">Pending Teacher Approvals</span>
+                <span className="px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 text-[10px] font-bold">
+                  {pendingTeachers.length} Pending
+                </span>
+              </div>
+              <span className="text-[11px] text-[var(--text-muted)]">
+                Review and verify new faculty registrations before they can publish campus notices, manage events, and access faculty administrative features.
+              </span>
+            </div>
+          </div>
+
+          {approvalFeedback && (
+            <div className="mx-4 p-3 rounded-2xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200 text-xs flex items-center justify-between animate-in fade-in">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span className="font-medium">{approvalFeedback}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setApprovalFeedback(null)}
+                className="text-[11px] underline font-semibold text-emerald-700 dark:text-emerald-300 cursor-pointer"
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
+
+          {pendingTeachers.length === 0 ? (
+            <div className="p-10 text-center space-y-2">
+              <div className="w-10 h-10 rounded-2xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 flex items-center justify-center mx-auto">
+                <CheckCircle2 className="w-5 h-5" />
+              </div>
+              <h3 className="text-xs font-bold text-[var(--text-primary)]">All Faculty Verified</h3>
+              <p className="text-[11px] text-[var(--text-muted)] max-w-sm mx-auto">
+                There are no pending faculty applications requiring approval at this time. New faculty registrations will appear here for verification.
+              </p>
+            </div>
+          ) : (
+            <div className="divide-y divide-[var(--border-color)]">
+              {pendingTeachers.map(teacher => (
+                <div
+                  key={teacher.id}
+                  className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:bg-[var(--bg-main)]/50 transition-colors"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <img
+                      src={teacher.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${teacher.id}`}
+                      alt={teacher.name}
+                      className="w-10 h-10 rounded-2xl object-cover shrink-0 border border-[var(--border-color)]"
+                    />
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs font-bold text-[var(--text-primary)] truncate">
+                          {teacher.name}
+                        </span>
+                        <span className="px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 text-[10px] font-semibold">
+                          Pending Faculty
+                        </span>
+                        <span className="text-[10px] text-[var(--text-muted)]">
+                          {teacher.grade || 'Faculty Member'}
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-[var(--text-secondary)] truncate">
+                        {teacher.email}
+                      </div>
+                      <div className="text-[10px] text-[var(--text-muted)] mt-0.5">
+                        Registered: {teacher.joinedDate ? new Date(teacher.joinedDate).toLocaleDateString() : 'Recent'}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0 self-end md:self-center">
+                    {confirmRejectId === teacher.id ? (
+                      <div className="flex items-center gap-2 p-1.5 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800">
+                        <span className="text-[11px] text-rose-700 dark:text-rose-300 font-medium">Reject & remove?</span>
+                        <button
+                          type="button"
+                          onClick={() => handleRejectTeacher(teacher)}
+                          disabled={rejectingId === teacher.id}
+                          className="px-2 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-[10px] font-bold transition-colors cursor-pointer disabled:opacity-50"
+                        >
+                          {rejectingId === teacher.id ? 'Removing...' : 'Confirm Reject'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setConfirmRejectId(null)}
+                          className="px-2 py-1 rounded-lg bg-[var(--bg-surface)] hover:bg-[var(--bg-main)] text-[var(--text-muted)] text-[10px] font-medium border border-[var(--border-color)] cursor-pointer"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => handleApproveTeacher(teacher)}
+                          disabled={approvingId === teacher.id}
+                          className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer disabled:opacity-50"
+                        >
+                          <UserCheck className="w-3.5 h-3.5" />
+                          <span>{approvingId === teacher.id ? 'Approving...' : 'Approve Account'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setConfirmRejectId(teacher.id)}
+                          disabled={approvingId === teacher.id}
+                          className="px-3 py-1.5 rounded-xl bg-[var(--bg-surface)] hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/40 text-[var(--text-muted)] border border-[var(--border-color)] hover:border-rose-300 text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
+                        >
+                          <UserX className="w-3.5 h-3.5" />
+                          <span>Reject / Remove</span>
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Tab 1: Students List & Account Deletion */}
       {activeTab === 'students' && (
